@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Laboratorio de Series de Fourier</title>
+<style>
+:root{--bg:#0b1220;--panel:#121d31;--line:#263752;--txt:#e8eef8;--muted:#9fb0c8;--accent:#65d6c4}
+*{box-sizing:border-box}body{margin:0;background:linear-gradient(140deg,#09111f,#111e33);color:var(--txt);font:15px system-ui,Segoe UI,Arial}
+main{max-width:1150px;margin:28px auto;padding:0 18px}.head{margin-bottom:20px}.head h1{margin:0 0 6px;font-size:clamp(24px,4vw,36px)}.head p{color:var(--muted);margin:0}
+.layout{display:grid;grid-template-columns:300px 1fr;gap:16px}.panel{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:18px;box-shadow:0 12px 35px #0003}
+h2{font-size:17px;margin:0 0 14px}.field{margin:13px 0}.field label{display:flex;justify-content:space-between;color:var(--muted);font-size:13px;margin-bottom:6px}
+input,select,button{font:inherit}input[type=number],select{width:100%;background:#0b1527;color:var(--txt);border:1px solid #344966;border-radius:9px;padding:10px}
+input[type=range]{width:100%;accent-color:var(--accent)}.buttons{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
+button{border:1px solid #3c5875;background:#1a2a43;color:var(--txt);padding:10px 14px;border-radius:9px;cursor:pointer}
+button.primary{background:var(--accent);border-color:var(--accent);color:#09201d;font-weight:700}button:hover{filter:brightness(1.12)}
+.graphs{display:grid;grid-template-columns:1fr;gap:16px}.canvaswrap{background:#08111f;border:1px solid var(--line);border-radius:12px;padding:8px}
+canvas{width:100%;height:290px;display:block}.small canvas{height:190px}
+.metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:12px}.metric{background:#0b1527;border:1px solid var(--line);padding:10px;border-radius:10px}.metric span{display:block;color:var(--muted);font-size:12px}.metric b{font-size:18px}
+.note{font-size:12px;color:var(--muted);line-height:1.5;margin-top:14px}
+@media(max-width:800px){.layout{grid-template-columns:1fr}.metrics{grid-template-columns:1fr}}
+</style></head><body><main>
+<header class="head"><h1>Laboratorio de Series de Fourier</h1><p>Visualización, reconstrucción armónica y reproducción de señales periódicas.</p></header>
+<div class="layout"><section class="panel">
+<h2>Parámetros de la señal</h2>
+<div class="field"><label for="wave">Tipo de función</label><select id="wave"><option value="sine">Senoidal</option><option value="square">Cuadrada</option><option value="triangle">Triangular</option><option value="saw">Diente de sierra</option></select></div>
+<div class="field"><label for="freq">Frecuencia fundamental (Hz)</label><input id="freq" type="number" min="1" max="10000" step="1" value="440"></div>
+<div class="field"><label for="amp">Amplitud</label><input id="amp" type="number" min="0" max="2" step=".1" value="1"></div>
+<div class="field"><label for="terms">Número de armónicos <b id="termsLabel">20</b></label><input id="terms" type="range" min="1" max="20" value="20"></div>
+<div class="buttons"><button class="primary" id="play">▶ Reproducir</button><button id="pause">Ⅱ Pausar</button><button id="reset">Restablecer</button></div>
+<div class="note">La frecuencia, amplitud y número de armónicos se pueden modificar. El audio se sintetiza en el navegador; para escuchar, primero pulsa Reproducir.</div>
+</section>
+<section class="graphs">
+<div class="panel"><h2>Señal en el dominio del tiempo</h2><div class="canvaswrap"><canvas id="time"></canvas></div>
+<div class="metrics"><div class="metric"><span>Frecuencia</span><b id="mFreq">440 Hz</b></div><div class="metric"><span>Período</span><b id="mPeriod">2.273 ms</b></div><div class="metric"><span>Armónicos</span><b id="mTerms">20</b></div></div></div>
+<div class="panel small"><h2>Espectro de amplitud (DFT)</h2><div class="canvaswrap"><canvas id="spectrum"></canvas></div></div>
+</section></div></div>
+<script>
+const $=id=>document.getElementById(id);
+let audioCtx=null,oscNodes=[],gainNode=null,isPlaying=false;
+const wave=$('wave'),freq=$('freq'),amp=$('amp'),terms=$('terms');
+function coeffs(type,N){
+ let c=[];
+ if(type==='sine'){c.push({n:1,a:1,phase:0});}
+ if(type==='square'){for(let n=1;n<=N;n+=2)c.push({n,a:4/(Math.PI*n),phase:0});}
+ if(type==='triangle'){for(let n=1,k=0;n<=N;n+=2,k++)c.push({n,a:8/(Math.PI**2*n*n)*(k%2?-1:1),phase:0});}
+ if(type==='saw'){for(let n=1;n<=N;n++)c.push({n,a:2/ (Math.PI*n)*((n%2)?1:-1),phase:0});}
+ return c;
+}
+function value(type,theta,N){
+ if(type==='sine')return Math.sin(theta);
+ return coeffs(type,N).reduce((s,c)=>s+c.a*Math.sin(c.n*theta+c.phase),0);
+}
+function drawCanvas(canvas,fn,xmax,ymin,ymax,kind){
+ const dpr=window.devicePixelRatio||1,r=canvas.getBoundingClientRect(),w=Math.max(300,r.width),h=Math.max(150,r.height);
+ canvas.width=w*dpr;canvas.height=h*dpr;const c=canvas.getContext('2d');c.scale(dpr,dpr);
+ c.fillStyle='#08111f';c.fillRect(0,0,w,h);c.strokeStyle='#243650';c.lineWidth=1;
+ for(let i=0;i<=8;i++){let x=i*w/8;c.beginPath();c.moveTo(x,0);c.lineTo(x,h);c.stroke()}
+ for(let i=0;i<=4;i++){let y=i*h/4;c.beginPath();c.moveTo(0,y);c.lineTo(w,y);c.stroke()}
+ c.strokeStyle='#8295ad';c.beginPath();let zy=h-(0-ymin)/(ymax-ymin)*h;c.moveTo(0,zy);c.lineTo(w,zy);c.stroke();
+ c.strokeStyle='#65d6c4';c.lineWidth=2;c.beginPath();
+ let started=false;for(let px=0;px<w;px++){let x=px/w*xmax,y=fn(x),py=h-(y-ymin)/(ymax-ymin)*h;if(!Number.isFinite(py))continue;if(!started){c.moveTo(px,py);started=true}else c.lineTo(px,py)}c.stroke();
+ c.fillStyle='#9fb0c8';c.font='11px system-ui';c.fillText(kind==='time'?'0': '0 Hz',5,h-7);c.fillText(kind==='time'?'2T':'frecuencia',w-70,h-7);
+}
+function update(){
+ const f=Math.max(1,Math.min(10000,+freq.value||440)),A=Math.max(0,Math.min(2,+amp.value||0)),N=+terms.value,type=wave.value;
+ $('termsLabel').textContent=N;$('mFreq').textContent=f+' Hz';$('mPeriod').textContent=(1000/f).toFixed(3)+' ms';$('mTerms').textContent=N;
+ const coeff=coeffs(type,N);
+ drawCanvas($('time'),x=>A*value(type,2*Math.PI*x,N),2,-2.3,2.3,'time');
+ const sampleCount=256, samples=Array.from({length:sampleCount},(_,i)=>A*value(type,2*Math.PI*i/sampleCount,N));
+ const bins=Array.from({length:sampleCount/2+1},(_,k)=>{let re=0,im=0;for(let n=0;n<sampleCount;n++){let ang=2*Math.PI*k*n/sampleCount;re+=samples[n]*Math.cos(ang);im-=samples[n]*Math.sin(ang)}let mag=Math.hypot(re,im)/sampleCount;return (k===0||k===sampleCount/2)?mag:2*mag});
+ const maxMag=Math.max(.1,...bins);
+ drawCanvas($('spectrum'),x=>bins[Math.max(0,Math.min(bins.length-1,Math.round(x)))]||0,bins.length,0,maxMag*1.15,'spectrum');
+ if(isPlaying) startAudio(true);
+}
+async function startAudio(rebuild=false){
+ const f=Math.max(1,Math.min(10000,+freq.value||440)),A=Math.max(0,Math.min(2,+amp.value||0)),N=+terms.value,type=wave.value;
+ if(!audioCtx)audioCtx=new (window.AudioContext||window.webkitAudioContext)();
+ await audioCtx.resume();
+ if(rebuild){oscNodes.forEach(o=>{try{o.stop()}catch(e){}});oscNodes=[];}
+ if(!isPlaying||rebuild){
+  gainNode=audioCtx.createGain();gainNode.gain.value=.18;gainNode.connect(audioCtx.destination);
+  const cs=coeffs(type,N);
+  if(type==='sine'){let o=audioCtx.createOscillator();o.type='sine';o.frequency.value=f;o.connect(gainNode);o.start();oscNodes.push(o);}
+  else cs.forEach(c=>{let o=audioCtx.createOscillator();o.type='sine';o.frequency.value=f*c.n;let g=audioCtx.createGain();g.gain.value=A*c.a; o.connect(g);g.connect(gainNode);o.start();oscNodes.push(o);});
+  isPlaying=true;$('play').textContent='▶ Reproduciendo';
+ }
+}
+function pauseAudio(){oscNodes.forEach(o=>{try{o.stop()}catch(e){}});oscNodes=[];isPlaying=false;$('play').textContent='▶ Reproducir';}
+$('play').addEventListener('click',()=>startAudio(true));$('pause').addEventListener('click',pauseAudio);
+$('reset').addEventListener('click',()=>{pauseAudio();wave.value='sine';freq.value=440;amp.value=1;terms.value=20;update()});
+[wave,freq,amp,terms].forEach(el=>el.addEventListener('input',update));
+window.addEventListener('resize',update);update();
+</script></main></body></html>
